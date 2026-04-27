@@ -25,7 +25,7 @@ build_glibc_into() {
 
     target_cc="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-gcc --sysroot=${destination_sysroot} -march=${TARGET_MARCH} -mfloat-abi=${TARGET_FLOAT_ABI} -mfpu=${TARGET_FPU}"
     target_cppflags="--sysroot=${destination_sysroot}"
-    target_cflags="-march=${TARGET_MARCH} -mfloat-abi=${TARGET_FLOAT_ABI} -mfpu=${TARGET_FPU}"
+    target_cflags="-O2 -march=${TARGET_MARCH} -mfloat-abi=${TARGET_FLOAT_ABI} -mfpu=${TARGET_FPU}"
 
     run_in_dir "${build_dir}" env \
         BUILD_CC=gcc \
