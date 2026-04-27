@@ -72,6 +72,19 @@ Build the llvm-libc route:
 ./build-toolchain.sh --libc llvm-libc --cxx-runtime libc++
 ```
 
+## GitHub Actions
+
+The repository includes a manual workflow at `.github/workflows/build-toolchain.yml` for running full builds on GitHub-hosted `ubuntu-24.04` runners.
+
+- Trigger it from the Actions tab with the `Build Cross Toolchain` workflow.
+- Select one supported `combo` input instead of mixing `--libc` and `--cxx-runtime` manually.
+- Override individual component versions through the workflow inputs when needed.
+- Successful runs upload `artifacts/*.tar.xz` and the matching `.manifest` file.
+- Build logs are always uploaded as a separate workflow artifact.
+- `run_smoke_tests` can be left enabled to run `tests/smoke.sh` after the build finishes.
+
+The workflow is intentionally `workflow_dispatch` only because full cross-toolchain builds are long-running and disk-heavy.
+
 Override individual component versions:
 
 ```bash

@@ -1,0 +1,230 @@
+name: Build Cross Toolchain
+
+on:
+  workflow_dispatch:
+    inputs:
+      combo:
+        description: Supported libc and C++ runtime combination
+        required: true
+        default: glibc-libstdcxx
+        type: choice
+        options:
+          - glibc-libstdcxx
+          - glibc-libcxx
+          - musl-libstdcxx
+          - musl-libcxx
+          - llvm-libc-libcxx
+      jobs:
+        description: Parallel make jobs passed to build-toolchain.sh
+        required: true
+        default: "4"
+        type: string
+      gcc_version:
+        description: GCC version
+        required: true
+        default: "14.2.0"
+        type: string
+      binutils_version:
+        description: Binutils version
+        required: true
+        default: "2.43"
+        type: string
+      linux_headers_version:
+        description: Linux headers version
+        required: true
+        default: "6.6.58"
+        type: string
+      glibc_version:
+        description: glibc version
+        required: true
+        default: "2.40"
+        type: string
+      musl_version:
+        description: musl version
+        required: true
+        default: "1.2.5"
+        type: string
+      llvm_project_version:
+        description: llvm-project version
+        required: true
+        default: "19.1.7"
+        type: string
+      run_smoke_tests:
+        description: Run tests/smoke.sh after a successful build
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: build-toolchain-${{ github.ref }}-${{ inputs.combo }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ inputs.combo }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Reclaim runner disk space
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h
+
+      - name: Install host dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          mapfile -t packages < <(awk -F'|' '
+            NF && $1 !~ /^#/ && $2 != "" { seen[$2] = 1 }
+            END {
+              for (package in seen) {
+                print package
+              }
+            }
+          ' config/ubuntu-24.04-deps.txt | sort)
+          sudo apt-get install -y --no-install-recommends "${packages[@]}"
+
+      - name: Cache source archives
+        uses: actions/cache@v4
+        with:
+          path: downloads
+          key: ${{ runner.os }}-downloads-${{ inputs.gcc_version }}-${{ inputs.binutils_version }}-${{ inputs.linux_headers_version }}-${{ inputs.glibc_version }}-${{ inputs.musl_version }}-${{ inputs.llvm_project_version }}
+          restore-keys: |
+            ${{ runner.os }}-downloads-
+
+      - name: Resolve selected combo
+        id: combo
+        run: |
+          set -euo pipefail
+          case "${{ inputs.combo }}" in
+            glibc-libstdcxx)
+              libc_variant="glibc"
+              cxx_runtime="libstdc++"
+              ;;
+            glibc-libcxx)
+              libc_variant="glibc"
+              cxx_runtime="libc++"
+              ;;
+            musl-libstdcxx)
+              libc_variant="musl"
+              cxx_runtime="libstdc++"
+              ;;
+            musl-libcxx)
+              libc_variant="musl"
+              cxx_runtime="libc++"
+              ;;
+            llvm-libc-libcxx)
+              libc_variant="llvm-libc"
+              cxx_runtime="libc++"
+              ;;
+            *)
+              echo "Unsupported combo: ${{ inputs.combo }}" >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "libc_variant=${libc_variant}"
+            echo "cxx_runtime=${cxx_runtime}"
+            echo "artifact_label=${{ inputs.combo }}-gcc-${{ inputs.gcc_version }}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Build selected toolchain
+        run: |
+          set -euo pipefail
+          bash ./build-toolchain.sh \
+            --libc "${{ steps.combo.outputs.libc_variant }}" \
+            --cxx-runtime "${{ steps.combo.outputs.cxx_runtime }}" \
+            --jobs "${{ inputs.jobs }}" \
+            --gcc-version "${{ inputs.gcc_version }}" \
+            --binutils-version "${{ inputs.binutils_version }}" \
+            --linux-headers-version "${{ inputs.linux_headers_version }}" \
+            --glibc-version "${{ inputs.glibc_version }}" \
+            --musl-version "${{ inputs.musl_version }}" \
+            --llvm-project-version "${{ inputs.llvm_project_version }}"
+
+      - name: Resolve build outputs
+        id: outputs
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          manifest_path="$(find artifacts -maxdepth 1 -type f -name '*.manifest' | sort | tail -n 1 || true)"
+          if [[ -z "${manifest_path}" ]]; then
+            exit 0
+          fi
+
+          # shellcheck disable=SC1090
+          source "${manifest_path}"
+          {
+            echo "manifest_path=${manifest_path}"
+            echo "build_name=${BUILD_NAME}"
+            echo "prefix_dir=${PREFIX_DIR}"
+            echo "sysroot_dir=${SYSROOT_DIR}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Run smoke tests
+        if: ${{ success() && inputs.run_smoke_tests && steps.outputs.outputs.build_name != '' }}
+        run: |
+          set -euo pipefail
+          bash ./tests/smoke.sh \
+            "${{ steps.outputs.outputs.prefix_dir }}" \
+            "${{ steps.outputs.outputs.sysroot_dir }}"
+
+      - name: Publish workflow summary
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Cross toolchain build"
+            echo
+            echo "- Combo: ${{ inputs.combo }}"
+            echo "- Jobs: ${{ inputs.jobs }}"
+            echo "- GCC: ${{ inputs.gcc_version }}"
+            echo "- Binutils: ${{ inputs.binutils_version }}"
+            echo "- Linux headers: ${{ inputs.linux_headers_version }}"
+            echo "- glibc: ${{ inputs.glibc_version }}"
+            echo "- musl: ${{ inputs.musl_version }}"
+            echo "- llvm-project: ${{ inputs.llvm_project_version }}"
+            if [[ -n "${{ steps.outputs.outputs.build_name }}" ]]; then
+              echo "- Build name: ${{ steps.outputs.outputs.build_name }}"
+            fi
+            if compgen -G 'artifacts/*.tar.xz' >/dev/null; then
+              echo
+              echo "### Archives"
+              find artifacts -maxdepth 1 -type f -name '*.tar.xz' -printf -- '- %f\n' | sort
+            fi
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload packaged toolchain
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.combo.outputs.artifact_label }}
+          path: |
+            artifacts/*.tar.xz
+            artifacts/*.manifest
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload build logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.combo.outputs.artifact_label }}-logs
+          path: logs/
+          if-no-files-found: warn
+          retention-days: 14
