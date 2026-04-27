@@ -15,7 +15,7 @@ build_target_libgcc() {
 
 build_glibc_into() {
     local destination_sysroot=$1
-    local glibc_source_dir build_dir
+    local glibc_source_dir build_dir target_cc target_cppflags target_cflags
 
     ensure_source_tree glibc "${GLIBC_VERSION}" glibc_source_dir
     build_dir="${WORK_DIR}/40-glibc-build-$(basename "${destination_sysroot}")"
@@ -23,13 +23,20 @@ build_glibc_into() {
     ensure_dir "${destination_sysroot}/usr/include"
     ensure_dir "${destination_sysroot}/usr/lib"
 
+    target_cc="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-gcc --sysroot=${destination_sysroot} -march=${TARGET_MARCH} -mfloat-abi=${TARGET_FLOAT_ABI} -mfpu=${TARGET_FPU}"
+    target_cppflags="--sysroot=${destination_sysroot}"
+    target_cflags="-march=${TARGET_MARCH} -mfloat-abi=${TARGET_FLOAT_ABI} -mfpu=${TARGET_FPU}"
+
     run_in_dir "${build_dir}" env \
         BUILD_CC=gcc \
-        CC="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-gcc" \
+        CC="${target_cc}" \
         AR="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-ar" \
         AS="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-as" \
         LD="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-ld" \
         NM="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-nm" \
+        CPPFLAGS="${target_cppflags}" \
+        CFLAGS="${target_cflags}" \
+        LDFLAGS="${target_cppflags}" \
         RANLIB="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-ranlib" \
         READELF="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-readelf" \
         MAKEINFO=true \
@@ -48,7 +55,17 @@ build_glibc_into() {
     run_cmd install -m 0644 "${build_dir}/csu/crt1.o" "${destination_sysroot}/usr/lib/crt1.o"
     run_cmd install -m 0644 "${build_dir}/csu/crti.o" "${destination_sysroot}/usr/lib/crti.o"
     run_cmd install -m 0644 "${build_dir}/csu/crtn.o" "${destination_sysroot}/usr/lib/crtn.o"
-    run_cmd "${PREFIX_DIR}/bin/${TARGET_TRIPLE}-gcc" -nostdlib -nostartfiles -shared -x c /dev/null -o "${destination_sysroot}/usr/lib/libc.so"
+    run_cmd \
+        "${PREFIX_DIR}/bin/${TARGET_TRIPLE}-gcc" \
+        "--sysroot=${destination_sysroot}" \
+        "-march=${TARGET_MARCH}" \
+        "-mfloat-abi=${TARGET_FLOAT_ABI}" \
+        "-mfpu=${TARGET_FPU}" \
+        -nostdlib \
+        -nostartfiles \
+        -shared \
+        -x c /dev/null \
+        -o "${destination_sysroot}/usr/lib/libc.so"
 
     if [[ "${DRY_RUN}" -eq 1 ]]; then
         log "[dry-run] touch ${destination_sysroot}/usr/include/gnu/stubs.h"
