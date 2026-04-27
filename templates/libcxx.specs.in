@@ -1,0 +1,4 @@
+%rename lib original_lib
+
+*lib:
+%(original_lib) -L@RUNTIME_LIB_DIR@ @BUILTINS_FLAG@ -Wl,-rpath-link,@SYSROOT_DIR@/lib -Wl,-rpath-link,@SYSROOT_DIR@/usr/lib -lc++ -lc++abi -lunwind

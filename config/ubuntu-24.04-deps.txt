@@ -1,0 +1,21 @@
+# command|package|scope|note
+bash|bash|base|Shell runtime.
+curl|curl|base|Download source archives.
+sha256sum|coreutils|base|Verify archive integrity.
+tar|tar|base|Extract source archives.
+xz|xz-utils|base|Handle xz-compressed archives.
+make|build-essential|base|Build GNU components.
+gcc|build-essential|base|Host C compiler.
+g++|build-essential|base|Host C++ compiler.
+awk|gawk|base|Build helper scripts.
+sed|sed|base|Text processing.
+grep|grep|base|Text processing.
+bison|bison|base|Parser generation for GNU builds.
+flex|flex|base|Lexer generation for GNU builds.
+patch|patch|base|Apply local fixes when needed.
+python3|python3|base|Build tooling support.
+cmake|cmake|llvm|Configure LLVM libc and runtimes.
+ninja|ninja-build|llvm|Build LLVM libc and runtimes.
+clang|clang|llvm|Build LLVM libc and runtimes.
+clang++|clang|llvm|Build LLVM libc and runtimes.
+lld|lld|llvm|Preferred linker for LLVM runtimes.

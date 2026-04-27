@@ -1,0 +1,12 @@
+artifacts/
+build/
+downloads/
+install/
+logs/
+sysroots/
+
+*.log
+*.tmp
+*.swp
+*.swo
+.DS_Store
