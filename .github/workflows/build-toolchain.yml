@@ -50,7 +50,7 @@ on:
         default: "19.1.7"
         type: string
       run_smoke_tests:
-        description: Run tests/smoke.sh after a successful build
+        description: Run compile and qemu runtime smoke tests after a successful build
         required: true
         default: true
         type: boolean
@@ -96,6 +96,11 @@ jobs:
               }
             }
           ' config/ubuntu-24.04-deps.txt | sort)
+
+          if [[ "${{ inputs.run_smoke_tests }}" == "true" ]]; then
+            packages+=(qemu-user)
+          fi
+
           sudo apt-get install -y --no-install-recommends "${packages[@]}"
 
       - name: Cache source archives
@@ -180,7 +185,7 @@ jobs:
         if: ${{ success() && inputs.run_smoke_tests && steps.outputs.outputs.build_name != '' }}
         run: |
           set -euo pipefail
-          bash ./tests/smoke.sh \
+          RUN_RUNTIME_SMOKE=1 bash ./tests/smoke.sh \
             "${{ steps.outputs.outputs.prefix_dir }}" \
             "${{ steps.outputs.outputs.sysroot_dir }}"
 

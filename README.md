@@ -30,7 +30,7 @@ Rejected in v1:
 - `lib/`: shared Bash helpers
 - `stages/`: ordered build stages
 - `templates/`: generated specs fragments used by wrapper drivers
-- `tests/smoke.sh`: basic compile-only smoke test script
+- `tests/smoke.sh`: basic smoke test script for compile checks and optional qemu runtime checks
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ Check host tools:
 Typical Ubuntu 24.04 setup for the full matrix:
 
 ```bash
-sudo apt install build-essential curl gawk sed grep bison flex patch python3 xz-utils tar cmake ninja-build clang lld
+sudo apt install build-essential curl gawk sed grep bison flex patch python3 texinfo xz-utils tar cmake ninja-build clang lld
 ```
 
 ## Examples
@@ -81,7 +81,7 @@ The repository includes a manual workflow at `.github/workflows/build-toolchain.
 - Override individual component versions through the workflow inputs when needed.
 - Successful runs upload `artifacts/*.tar.xz` and the matching `.manifest` file.
 - Build logs are always uploaded as a separate workflow artifact.
-- `run_smoke_tests` can be left enabled to run `tests/smoke.sh` after the build finishes.
+- `run_smoke_tests` can be left enabled to run `tests/smoke.sh` after the build finishes, including the optional `qemu-arm` runtime check used in CI.
 
 The workflow is intentionally `workflow_dispatch` only because full cross-toolchain builds are long-running and disk-heavy.
 
@@ -118,3 +118,11 @@ After a successful build, compile sample C and C++ programs:
 ```bash
 ./tests/smoke.sh "$(pwd)/install/<build-name>" "$(pwd)/sysroots/<build-name>"
 ```
+
+Optionally run the compiled ARM binaries under `qemu-arm`:
+
+```bash
+RUN_RUNTIME_SMOKE=1 ./tests/smoke.sh "$(pwd)/install/<build-name>" "$(pwd)/sysroots/<build-name>"
+```
+
+This runtime mode expects `qemu-arm` from the `qemu-user` package to be installed on the host.

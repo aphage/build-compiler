@@ -39,7 +39,6 @@ build_glibc_into() {
         LDFLAGS="${target_cppflags}" \
         RANLIB="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-ranlib" \
         READELF="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-readelf" \
-        MAKEINFO=true \
         "${glibc_source_dir}/configure" \
         --prefix=/usr \
         --build="${HOST_TRIPLE}" \
@@ -49,8 +48,8 @@ build_glibc_into() {
         --disable-werror \
         --enable-kernel="${GLIBC_MIN_KERNEL}"
 
-    run_in_dir "${build_dir}" make MAKEINFO=true -j "${JOBS}" install-bootstrap-headers=yes install-headers cross_compiling=yes install_root="${destination_sysroot}"
-    run_in_dir "${build_dir}" make MAKEINFO=true -j "${JOBS}" csu/subdir_lib
+    run_in_dir "${build_dir}" make -j "${JOBS}" install-bootstrap-headers=yes install-headers cross_compiling=yes install_root="${destination_sysroot}"
+    run_in_dir "${build_dir}" make -j "${JOBS}" csu/subdir_lib
 
     run_cmd install -m 0644 "${build_dir}/csu/crt1.o" "${destination_sysroot}/usr/lib/crt1.o"
     run_cmd install -m 0644 "${build_dir}/csu/crti.o" "${destination_sysroot}/usr/lib/crti.o"
@@ -76,8 +75,8 @@ build_glibc_into() {
 
     build_target_libgcc
 
-    run_in_dir "${build_dir}" make MAKEINFO=true -j "${JOBS}"
-    run_in_dir "${build_dir}" make MAKEINFO=true install install_root="${destination_sysroot}"
+    run_in_dir "${build_dir}" make -j "${JOBS}"
+    run_in_dir "${build_dir}" make install install_root="${destination_sysroot}"
 }
 
 build_musl_into() {
