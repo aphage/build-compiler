@@ -21,6 +21,171 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+path_exists() {
+    [[ -e "$1" || -L "$1" ]]
+}
+
+build_path_map_flags() {
+    local mapped_root=/usr/src/build-toolchain
+
+    printf '%s' "-ffile-prefix-map=${ROOT_DIR}=${mapped_root} -fdebug-prefix-map=${ROOT_DIR}=${mapped_root} -fmacro-prefix-map=${ROOT_DIR}=${mapped_root}"
+}
+
+escape_sed_pattern() {
+    printf '%s' "$1" | sed -e 's/[][(){}.^$*+?|\\/]/\\&/g'
+}
+
+escape_sed_replacement() {
+    printf '%s' "$1" | sed 's/[&|]/\\&/g'
+}
+
+refresh_symlink() {
+    local link_path=$1
+    local target_path=$2
+
+    if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+        log "[dry-run] ln -sfn ${target_path} ${link_path}"
+        return 0
+    fi
+
+    rm -rf "${link_path}"
+    ln -s "${target_path}" "${link_path}"
+}
+
+rewrite_internal_absolute_symlinks() {
+    local tree_root=$1
+    local link_path link_target resolved_target relative_target
+
+    command_exists realpath || die "realpath is required to rewrite internal symlinks"
+
+    while IFS= read -r -d '' link_path; do
+        link_target="$(readlink "${link_path}")"
+        [[ "${link_target}" == /* ]] || continue
+
+        resolved_target="${tree_root}${link_target}"
+        if ! path_exists "${resolved_target}"; then
+            continue
+        fi
+
+        relative_target="$(realpath --no-symlinks --relative-to="$(dirname "${link_path}")" "${resolved_target}")"
+
+        if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+            log "[dry-run] ln -sfn ${relative_target} ${link_path}"
+            continue
+        fi
+
+        rm -f "${link_path}"
+        ln -s "${relative_target}" "${link_path}"
+    done < <(find "${tree_root}" -type l -print0)
+}
+
+remove_path() {
+    local target_path=$1
+
+    if ! path_exists "${target_path}"; then
+        return 0
+    fi
+
+    if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+        log "[dry-run] rm -rf ${target_path}"
+        return 0
+    fi
+
+    rm -rf "${target_path}"
+}
+
+strip_debug_symbols_in_tree() {
+    local tree_root=$1
+    local candidate file_info target_strip strip_status
+
+    target_strip="${PREFIX_DIR}/bin/${TARGET_TRIPLE}-strip"
+
+    while IFS= read -r -d '' candidate; do
+        file_info="$(file -b "${candidate}" 2>/dev/null || true)"
+        case "${file_info}" in
+            ELF*|current\ ar\ archive*)
+                if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+                    log "[dry-run] strip --strip-debug ${candidate}"
+                    continue
+                fi
+
+                strip_status=0
+                if ! strip --strip-debug "${candidate}" >/dev/null 2>&1; then
+                    strip_status=$?
+
+                    if [[ -x "${target_strip}" ]]; then
+                        if "${target_strip}" --strip-debug "${candidate}" >/dev/null 2>&1; then
+                            strip_status=0
+                        fi
+                    fi
+                fi
+
+                if [[ "${strip_status}" -ne 0 ]]; then
+                    warn "unable to strip debug info from ${candidate}"
+                fi
+                ;;
+        esac
+    done < <(find "${tree_root}" -type f -print0)
+}
+
+sanitize_text_paths_in_tree() {
+    local tree_root=$1
+    local logical_work_dir="/build/${BUILD_NAME}"
+    local logical_source_dir=/sources
+    local logical_root=/workspace
+    local logical_sysroot="${CONFIGURE_PREFIX}/${TARGET_TRIPLE}/sysroot"
+    local -a replacements=(
+        "${SYSROOT_DIR}|${logical_sysroot}"
+        "${PREFIX_DIR}|${CONFIGURE_PREFIX}"
+        "${WORK_DIR}|${logical_work_dir}"
+        "${SOURCE_CACHE_DIR}|${logical_source_dir}"
+        "${ROOT_DIR}|${logical_root}"
+    )
+    local replacement old_path new_path sed_pattern sed_replacement candidate
+
+    for replacement in "${replacements[@]}"; do
+        old_path=${replacement%%|*}
+        new_path=${replacement#*|}
+        sed_pattern="$(escape_sed_pattern "${old_path}")"
+        sed_replacement="$(escape_sed_replacement "${new_path}")"
+
+        while IFS= read -r candidate; do
+            [[ -n "${candidate}" ]] || continue
+
+            if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+                log "[dry-run] sanitize ${candidate}: ${old_path} -> ${new_path}"
+                continue
+            fi
+
+            sed -i "s|${sed_pattern}|${sed_replacement}|g" "${candidate}"
+        done < <(grep --binary-files=without-match -RIl -- "${old_path}" "${tree_root}" || true)
+    done
+}
+
+sanitize_remaining_root_paths_in_tree() {
+    local tree_root=$1
+    local mapped_root=/usr/src/build-toolchain
+    local candidate
+
+    if [[ "${#ROOT_DIR}" -ne "${#mapped_root}" ]]; then
+        die "cannot sanitize binary root paths safely: ${ROOT_DIR} and ${mapped_root} have different lengths"
+    fi
+
+    command_exists perl || die "perl is required to sanitize remaining root paths in binaries"
+
+    while IFS= read -r candidate; do
+        [[ -n "${candidate}" ]] || continue
+
+        if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+            log "[dry-run] sanitize remaining root path in ${candidate}: ${ROOT_DIR} -> ${mapped_root}"
+            continue
+        fi
+
+        ROOT_PATH_OLD="${ROOT_DIR}" ROOT_PATH_NEW="${mapped_root}" \
+            perl -0pi -e 's/\Q$ENV{ROOT_PATH_OLD}\E/$ENV{ROOT_PATH_NEW}/g' "${candidate}"
+    done < <(grep -a -Rl -- "${ROOT_DIR}" "${tree_root}" || true)
+}
+
 load_os_release() {
     if [[ -r /etc/os-release ]]; then
         # shellcheck disable=SC1091
@@ -68,6 +233,20 @@ ensure_layout() {
 
 slugify() {
     printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._-' '-'
+}
+
+build_name_cxx_runtime_tag() {
+    case "$1" in
+        libc++)
+            printf 'libcxx'
+            ;;
+        libstdc++)
+            printf 'libstdcxx'
+            ;;
+        *)
+            printf '%s' "$1"
+            ;;
+    esac
 }
 
 format_command() {
@@ -196,16 +375,46 @@ check_host_dependencies() {
     fi
 }
 
-prepare_build_context() {
-    BUILD_NAME="$(slugify "${TARGET_TRIPLE}-${LIBC_VARIANT}-${CXX_RUNTIME}-gcc-${GCC_VERSION}-binutils-${BINUTILS_VERSION}-linux-${LINUX_HEADERS_VERSION}")"
+resolve_build_paths() {
+    local cxx_runtime_tag
+
+    cxx_runtime_tag="$(build_name_cxx_runtime_tag "${CXX_RUNTIME}")"
+    BUILD_NAME="$(slugify "${TARGET_TRIPLE}-${LIBC_VARIANT}-${cxx_runtime_tag}-gcc-${GCC_VERSION}-binutils-${BINUTILS_VERSION}-linux-${LINUX_HEADERS_VERSION}")"
     WORK_DIR="${BUILD_DIR}/${BUILD_NAME}"
+    CONFIGURE_PREFIX="/${BUILD_NAME}"
+    CONFIGURE_SYSROOT="${CONFIGURE_PREFIX}/${TARGET_TRIPLE}/sysroot"
     PREFIX_DIR="${INSTALL_DIR}/${BUILD_NAME}"
-    SYSROOT_DIR="${SYSROOTS_DIR}/${BUILD_NAME}"
+    SYSROOT_DIR="${PREFIX_DIR}/${TARGET_TRIPLE}/sysroot"
+    SYSROOT_COMPAT_DIR="${SYSROOTS_DIR}/${BUILD_NAME}"
     MANIFEST_PATH="${ARTIFACTS_DIR}/${BUILD_NAME}.manifest"
+}
+
+prepare_build_context() {
+    resolve_build_paths
 
     ensure_dir "${WORK_DIR}"
     ensure_dir "${PREFIX_DIR}"
     ensure_dir "${SYSROOT_DIR}"
+    refresh_symlink "${SYSROOT_COMPAT_DIR}" "../install/${BUILD_NAME}/${TARGET_TRIPLE}/sysroot"
+}
+
+clean_build_outputs() {
+    local log_path
+    local -a log_paths=()
+
+    shopt -s nullglob
+    log_paths=("${LOGS_DIR}/${BUILD_NAME}."*.log)
+    shopt -u nullglob
+
+    remove_path "${WORK_DIR}"
+    remove_path "${PREFIX_DIR}"
+    remove_path "${SYSROOT_COMPAT_DIR}"
+    remove_path "${MANIFEST_PATH}"
+    remove_path "${ARTIFACTS_DIR}/${BUILD_NAME}.tar.xz"
+
+    for log_path in "${log_paths[@]}"; do
+        remove_path "${log_path}"
+    done
 }
 
 write_manifest() {
@@ -222,10 +431,10 @@ LINUX_HEADERS_VERSION=${LINUX_HEADERS_VERSION}
 GLIBC_VERSION=${GLIBC_VERSION}
 MUSL_VERSION=${MUSL_VERSION}
 LLVM_PROJECT_VERSION=${LLVM_PROJECT_VERSION}
-WORK_DIR=${WORK_DIR}
-PREFIX_DIR=${PREFIX_DIR}
-SYSROOT_DIR=${SYSROOT_DIR}
-SOURCE_CACHE_DIR=${SOURCE_CACHE_DIR}
+WORK_DIR=build/${BUILD_NAME}
+PREFIX_DIR=${CONFIGURE_PREFIX}
+SYSROOT_DIR=${CONFIGURE_PREFIX}/${TARGET_TRIPLE}/sysroot
+SOURCE_CACHE_DIR=build/sources
 GCC_ARCHIVE=${GCC_ARCHIVE}
 GCC_URL=${GCC_URL}
 GCC_SHA256=${GCC_SHA256}

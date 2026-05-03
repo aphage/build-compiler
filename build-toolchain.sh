@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ORIGINAL_PATH="${PATH}"
 
 source "${ROOT_DIR}/lib/common.sh"
 source "${ROOT_DIR}/lib/args.sh"
@@ -32,7 +33,8 @@ export_build_environment() {
     export GLIBC_MIN_KERNEL
     export DOWNLOADS_DIR BUILD_DIR INSTALL_DIR SYSROOTS_DIR LOGS_DIR ARTIFACTS_DIR SOURCE_CACHE_DIR
     export HOST_DEPS_FILE
-    export BUILD_NAME WORK_DIR PREFIX_DIR SYSROOT_DIR MANIFEST_PATH
+    export BUILD_NAME WORK_DIR PREFIX_DIR SYSROOT_DIR SYSROOT_COMPAT_DIR MANIFEST_PATH
+    export CONFIGURE_PREFIX CONFIGURE_SYSROOT
     export GCC_ARCHIVE GCC_URL GCC_SHA256
     export BINUTILS_ARCHIVE BINUTILS_URL BINUTILS_SHA256
     export LINUX_HEADERS_ARCHIVE LINUX_HEADERS_URL LINUX_HEADERS_SHA256
@@ -75,6 +77,13 @@ run_stage_file() {
 
     CURRENT_STAGE_ID="${stage_id}"
     CURRENT_STAGE_LOG="${LOGS_DIR}/${BUILD_NAME}.${stage_id}.log"
+
+    if [[ "${stage_id}" == "10-binutils" ]]; then
+        PATH="${ORIGINAL_PATH}"
+    else
+        PATH="${PREFIX_DIR}/bin:${ORIGINAL_PATH}"
+    fi
+
     export_build_environment
 
     log "starting stage ${stage_id}"
@@ -112,6 +121,8 @@ run_stage_pipeline() {
 }
 
 main() {
+    local command=build
+
     load_default_config
     parse_args "$@"
 
@@ -123,21 +134,45 @@ main() {
     load_user_config
     apply_cli_overrides
 
-    if [[ ${#POSITIONAL_ARGS[@]} -ne 0 ]]; then
+    if [[ ${#POSITIONAL_ARGS[@]} -gt 1 ]]; then
         die "unexpected positional arguments: ${POSITIONAL_ARGS[*]}"
     fi
 
+    if [[ ${#POSITIONAL_ARGS[@]} -eq 1 ]]; then
+        case "${POSITIONAL_ARGS[0]}" in
+            clean)
+                command=clean
+                ;;
+            *)
+                die "unexpected positional arguments: ${POSITIONAL_ARGS[*]}"
+                ;;
+        esac
+    fi
+
     ensure_layout
-    assert_host_supported
     resolve_versions
     validate_combo
-    prepare_build_context
-    export_build_environment
-    write_manifest
+    resolve_build_paths
 
     if [[ "${PRINT_CONFIG}" -eq 1 ]]; then
         print_config
     fi
+
+    if [[ "${command}" == "clean" ]]; then
+        clean_build_outputs
+
+        if [[ "${DRY_RUN}" -eq 1 ]]; then
+            log "dry run complete; clean plan emitted for ${BUILD_NAME}"
+        else
+            log "clean completed for ${BUILD_NAME}"
+        fi
+        return 0
+    fi
+
+    assert_host_supported
+    prepare_build_context
+    export_build_environment
+    write_manifest
 
     if [[ "${CHECK_HOST_DEPS}" -eq 1 ]]; then
         check_host_dependencies

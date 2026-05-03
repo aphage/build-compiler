@@ -60,6 +60,12 @@ Dry-run the stable GNU baseline:
 ./build-toolchain.sh --libc glibc --cxx-runtime libstdc++ --dry-run
 ```
 
+Clean the generated outputs for the resolved combo without touching cached downloads or extracted source trees:
+
+```bash
+./build-toolchain.sh clean --libc glibc --cxx-runtime libstdc++
+```
+
 Build a musl toolchain using LLVM libc++:
 
 ```bash
@@ -71,6 +77,8 @@ Build the llvm-libc route:
 ```bash
 ./build-toolchain.sh --libc llvm-libc --cxx-runtime libc++
 ```
+
+This route now reuses a matching glibc donor sysroot from an existing glibc toolchain under `install/` instead of building glibc during the llvm-libc run itself. Build a matching glibc combo first if no donor sysroot is present.
 
 ## GitHub Actions
 
@@ -104,9 +112,15 @@ Resume from a later stage:
 ./build-toolchain.sh --resume 50-llvm-runtimes
 ```
 
+Preview what the clean command would remove:
+
+```bash
+./build-toolchain.sh clean --libc glibc --cxx-runtime libstdc++ --dry-run
+```
+
 ## Notes
 
-- `llvm-libc` support in v1 uses a hybrid boundary: the target sysroot still carries ARM glibc's `ld-linux-armhf.so.3` loader.
+- `llvm-libc` support in v1 uses a hybrid boundary: the target sysroot still carries ARM glibc's `ld-linux-armhf.so.3` loader and startup objects copied from a matching prebuilt glibc donor sysroot.
 - When `libc++` is selected, the final GCC drivers are wrapped instead of patching GCC's installed specs in place.
 - The generated wrappers use `-nostdlib++` and generated specs fragments so `g++` defaults to `libc++` for that build output.
 - The downloader uses the repository's own checksum table for deterministic validation.
@@ -116,13 +130,15 @@ Resume from a later stage:
 After a successful build, compile sample C and C++ programs:
 
 ```bash
-./tests/smoke.sh "$(pwd)/install/<build-name>" "$(pwd)/sysroots/<build-name>"
+./tests/smoke.sh "$(pwd)/install/<build-name>"
 ```
 
 Optionally run the compiled ARM binaries under `qemu-arm`:
 
 ```bash
-RUN_RUNTIME_SMOKE=1 ./tests/smoke.sh "$(pwd)/install/<build-name>" "$(pwd)/sysroots/<build-name>"
+RUN_RUNTIME_SMOKE=1 ./tests/smoke.sh "$(pwd)/install/<build-name>"
 ```
 
 This runtime mode expects `qemu-arm` from the `qemu-user` package to be installed on the host.
+
+The toolchain now carries its default sysroot inside the install prefix at `/<build-name>/<target-triple>/sysroot` and the local workspace keeps a compatibility symlink under `sysroots/<build-name>`.

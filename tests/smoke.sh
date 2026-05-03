@@ -2,13 +2,13 @@
 
 set -euo pipefail
 
-if [[ $# -lt 2 ]]; then
-    echo "usage: tests/smoke.sh <toolchain-prefix> <sysroot>" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+    echo "usage: tests/smoke.sh <toolchain-prefix> [sysroot]" >&2
     exit 1
 fi
 
 TOOLCHAIN_PREFIX=$1
-SYSROOT_DIR=$2
+SYSROOT_DIR=${2-}
 RUN_RUNTIME_SMOKE=${RUN_RUNTIME_SMOKE:-0}
 
 if [[ -n "${TARGET_TRIPLE:-}" ]]; then
@@ -24,6 +24,15 @@ else
     fi
 
     TARGET_TRIPLE=$(basename "${gcc_drivers[0]}" -gcc)
+fi
+
+if [[ -z "${SYSROOT_DIR}" ]]; then
+    SYSROOT_DIR="${TOOLCHAIN_PREFIX}/${TARGET_TRIPLE}/sysroot"
+fi
+
+if [[ ! -d "${SYSROOT_DIR}" ]]; then
+    echo "sysroot not found: ${SYSROOT_DIR}" >&2
+    exit 1
 fi
 
 if [[ "${RUN_RUNTIME_SMOKE}" == "1" ]]; then

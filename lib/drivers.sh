@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
 
-escape_sed_replacement() {
-    printf '%s' "$1" | sed 's/[&|]/\\&/g'
+runtime_lib_dir_to_spec() {
+    local runtime_lib_dir=$1
+
+    case "${runtime_lib_dir}" in
+        "${SYSROOT_DIR}")
+            printf '%%R'
+            ;;
+        "${SYSROOT_DIR}/"*)
+            printf '%%R%s' "${runtime_lib_dir#${SYSROOT_DIR}}"
+            ;;
+        *)
+            printf '%s' "${runtime_lib_dir}"
+            ;;
+    esac
 }
 
 detect_runtime_library_dir() {
@@ -26,13 +38,12 @@ render_template() {
     local runtime_lib_dir=$3
     local builtins_flag=${4-}
 
-    local sysroot_escaped runtime_lib_dir_escaped builtins_flag_escaped content
-    sysroot_escaped="$(escape_sed_replacement "${SYSROOT_DIR}")"
-    runtime_lib_dir_escaped="$(escape_sed_replacement "${runtime_lib_dir}")"
+    local runtime_lib_dir_spec runtime_lib_dir_escaped builtins_flag_escaped content
+    runtime_lib_dir_spec="$(runtime_lib_dir_to_spec "${runtime_lib_dir}")"
+    runtime_lib_dir_escaped="$(escape_sed_replacement "${runtime_lib_dir_spec}")"
     builtins_flag_escaped="$(escape_sed_replacement "${builtins_flag}")"
 
     content="$(sed \
-        -e "s|@SYSROOT_DIR@|${sysroot_escaped}|g" \
         -e "s|@RUNTIME_LIB_DIR@|${runtime_lib_dir_escaped}|g" \
         -e "s|@BUILTINS_FLAG@|${builtins_flag_escaped}|g" \
         "${template_path}")"
@@ -65,7 +76,7 @@ ensure_real_driver() {
 
 write_compiler_wrapper() {
     local wrapper_path=$1
-    local real_driver_path=$2
+    local target_triple=$2
     local include_args=$3
     local common_args=$4
     local link_args=$5
@@ -77,7 +88,11 @@ write_compiler_wrapper() {
 
 set -euo pipefail
 
-REAL_DRIVER="${real_driver_path}"
+WRAPPER_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+TOOLCHAIN_ROOT="\$(cd "\${WRAPPER_DIR}/.." && pwd)"
+TARGET_TRIPLE="${target_triple}"
+SYSROOT_DIR="\${TOOLCHAIN_ROOT}/${target_triple}/sysroot"
+REAL_DRIVER="\${WRAPPER_DIR}/\${0##*/}.real"
 COMMON_ARGS=( ${common_args} )
 INCLUDE_ARGS=( ${include_args} )
 LINK_ARGS=( ${link_args} )
@@ -139,30 +154,26 @@ install_runtime_wrappers() {
     gxx_specs_args=""
     gcc_link_args=""
     gxx_link_args=""
-    gcc_common_args="--sysroot \"${SYSROOT_DIR}\""
-    gxx_common_args="--sysroot \"${SYSROOT_DIR}\""
+    gcc_common_args="\"--sysroot\" \"\${SYSROOT_DIR}\""
+    gxx_common_args="\"--sysroot\" \"\${SYSROOT_DIR}\""
     gxx_include_args=""
 
     if [[ "${LIBC_VARIANT}" == "llvm-libc" ]]; then
-        gcc_specs_args="\"-specs=${llvmlibc_specs_path}\""
-        gxx_specs_args="\"-specs=${llvmlibc_specs_path}\""
+        gcc_specs_args="\"-specs=\${TOOLCHAIN_ROOT}/lib/toolchain/${TARGET_TRIPLE}.llvmlibc.specs\""
+        gxx_specs_args="\"-specs=\${TOOLCHAIN_ROOT}/lib/toolchain/${TARGET_TRIPLE}.llvmlibc.specs\""
     fi
 
     if [[ "${CXX_RUNTIME}" == "libc++" ]]; then
-        if [[ -d "${SYSROOT_DIR}/usr/include/c++/v1" ]]; then
-            gxx_include_args="\"-nostdinc++\" \"-isystem\" \"${SYSROOT_DIR}/usr/include/c++/v1\""
-        else
-            gxx_include_args="\"-nostdinc++\" \"-isystem\" \"${SYSROOT_DIR}/usr/include/c++/v1\""
-        fi
+        gxx_include_args="\"-nostdinc++\" \"-isystem\" \"\${SYSROOT_DIR}/usr/include/c++/v1\""
 
         gxx_common_args="${gxx_common_args} \"-nostdlib++\""
         if [[ -n "${gxx_specs_args}" ]]; then
-            gxx_specs_args="${gxx_specs_args} \"-specs=${libcxx_specs_path}\""
+            gxx_specs_args="${gxx_specs_args} \"-specs=\${TOOLCHAIN_ROOT}/lib/toolchain/${TARGET_TRIPLE}.libcxx.specs\""
         else
-            gxx_specs_args="\"-specs=${libcxx_specs_path}\""
+            gxx_specs_args="\"-specs=\${TOOLCHAIN_ROOT}/lib/toolchain/${TARGET_TRIPLE}.libcxx.specs\""
         fi
     fi
 
-    write_compiler_wrapper "${gcc_driver}" "${gcc_real_driver}" "" "${gcc_common_args}" "${gcc_link_args}" "${gcc_specs_args}"
-    write_compiler_wrapper "${gxx_driver}" "${gxx_real_driver}" "${gxx_include_args}" "${gxx_common_args}" "${gxx_link_args}" "${gxx_specs_args}"
+    write_compiler_wrapper "${gcc_driver}" "${TARGET_TRIPLE}" "" "${gcc_common_args}" "${gcc_link_args}" "${gcc_specs_args}"
+    write_compiler_wrapper "${gxx_driver}" "${TARGET_TRIPLE}" "${gxx_include_args}" "${gxx_common_args}" "${gxx_link_args}" "${gxx_specs_args}"
 }

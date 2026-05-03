@@ -1,4 +1,4 @@
 %rename link original_link
 
 *link:
-%(original_link) --dynamic-linker /lib/ld-linux-armhf.so.3 -rpath-link @SYSROOT_DIR@/lib -rpath-link @SYSROOT_DIR@/usr/lib -rpath-link @RUNTIME_LIB_DIR@
+%(original_link) -L@RUNTIME_LIB_DIR@ --dynamic-linker /lib/ld-linux-armhf.so.3 -rpath-link %R/lib -rpath-link %R/usr/lib -rpath-link @RUNTIME_LIB_DIR@

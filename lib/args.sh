@@ -198,26 +198,48 @@ parse_args() {
 
 show_help() {
     cat <<'EOF'
-Usage: build-toolchain.sh [options]
+Usage: build-toolchain.sh [clean] [options]
 
 Options:
-  --config PATH                  Load a user config file after defaults.
-  --host TRIPLE                  Override host triple.
-  --target TRIPLE                Override target triple.
-  --libc NAME                    Select glibc, musl, or llvm-libc.
-  --cxx-runtime NAME             Select libstdc++ or libc++.
-  --jobs N                       Set parallel job count.
-  --gcc-version VERSION          Override GCC version.
-  --binutils-version VERSION     Override binutils version.
-  --linux-headers-version VER    Override Linux headers version.
-  --glibc-version VERSION        Override glibc version.
-  --musl-version VERSION         Override musl version.
-  --llvm-project-version VER     Override LLVM project version.
-  --resume STAGE                 Resume from a specific stage.
-    --check-host-deps              Validate required host tools.
-  --print-config                 Print the resolved configuration.
-  --dry-run                      Validate the config without building.
-  --help                         Show this help text.
+--config PATH
+Load a user config file after defaults.
+--host TRIPLE
+Override host triple.
+--target TRIPLE
+Override target triple.
+--libc NAME
+Select glibc, musl, or llvm-libc.
+--cxx-runtime NAME
+Select libstdc++ or libc++.
+--jobs N
+Set parallel job count.
+--gcc-version VERSION
+Override GCC version.
+--binutils-version VERSION
+Override binutils version.
+--linux-headers-version VER
+Override Linux headers version.
+--glibc-version VERSION
+Override glibc version.
+--musl-version VERSION
+Override musl version.
+--llvm-project-version VER
+Override LLVM project version.
+--resume STAGE
+Resume from a specific stage.
+--check-host-deps
+Validate required host tools.
+--print-config
+Print the resolved configuration.
+--dry-run
+Validate the config without building.
+--help
+Show this help text.
+
+Commands:
+clean
+Remove generated outputs for the resolved build combo from build/, install/,
+sysroots/, logs/, and artifacts/ while preserving downloads/ and build/sources/.
 EOF
 }
 
