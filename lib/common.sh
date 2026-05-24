@@ -26,9 +26,42 @@ path_exists() {
 }
 
 build_path_map_flags() {
-    local mapped_root=/usr/src/build-toolchain
+    local mapped_root
+
+    mapped_root="$(sanitized_root_path)"
 
     printf '%s' "-ffile-prefix-map=${ROOT_DIR}=${mapped_root} -fdebug-prefix-map=${ROOT_DIR}=${mapped_root} -fmacro-prefix-map=${ROOT_DIR}=${mapped_root}"
+}
+
+sanitized_root_path() {
+    local base_root=/usr/src/build-toolchain
+    local fallback_prefix=/usr/src/
+    local target_length=${#ROOT_DIR}
+    local padding
+
+    if (( target_length < 2 )); then
+        die "cannot derive sanitized root path for ROOT_DIR=${ROOT_DIR}"
+    fi
+
+    if (( ${#base_root} == target_length )); then
+        printf '%s' "${base_root}"
+        return 0
+    fi
+
+    if (( ${#base_root} < target_length )); then
+        padding=$(printf '%*s' "$((target_length - ${#base_root}))" '' | tr ' ' '/')
+        printf '%s%s' "${base_root}" "${padding}"
+        return 0
+    fi
+
+    if (( ${#fallback_prefix} < target_length )); then
+        padding=$(printf '%*s' "$((target_length - ${#fallback_prefix}))" '' | tr ' ' 'x')
+        printf '%s%s' "${fallback_prefix}" "${padding}"
+        return 0
+    fi
+
+    padding=$(printf '%*s' "$((target_length - 1))" '' | tr ' ' 'x')
+    printf '/%s' "${padding}"
 }
 
 escape_sed_pattern() {
@@ -160,30 +193,6 @@ sanitize_text_paths_in_tree() {
             sed -i "s|${sed_pattern}|${sed_replacement}|g" "${candidate}"
         done < <(grep --binary-files=without-match -RIl -- "${old_path}" "${tree_root}" || true)
     done
-}
-
-sanitize_remaining_root_paths_in_tree() {
-    local tree_root=$1
-    local mapped_root=/usr/src/build-toolchain
-    local candidate
-
-    if [[ "${#ROOT_DIR}" -ne "${#mapped_root}" ]]; then
-        die "cannot sanitize binary root paths safely: ${ROOT_DIR} and ${mapped_root} have different lengths"
-    fi
-
-    command_exists perl || die "perl is required to sanitize remaining root paths in binaries"
-
-    while IFS= read -r candidate; do
-        [[ -n "${candidate}" ]] || continue
-
-        if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
-            log "[dry-run] sanitize remaining root path in ${candidate}: ${ROOT_DIR} -> ${mapped_root}"
-            continue
-        fi
-
-        ROOT_PATH_OLD="${ROOT_DIR}" ROOT_PATH_NEW="${mapped_root}" \
-            perl -0pi -e 's/\Q$ENV{ROOT_PATH_OLD}\E/$ENV{ROOT_PATH_NEW}/g' "${candidate}"
-    done < <(grep -a -Rl -- "${ROOT_DIR}" "${tree_root}" || true)
 }
 
 load_os_release() {
@@ -418,42 +427,50 @@ clean_build_outputs() {
 }
 
 write_manifest() {
-    cat >"${MANIFEST_PATH}" <<EOF
-BUILD_NAME=${BUILD_NAME}
-HOST_TRIPLE=${HOST_TRIPLE}
-TARGET_TRIPLE=${TARGET_TRIPLE}
-LIBC_VARIANT=${LIBC_VARIANT}
-CXX_RUNTIME=${CXX_RUNTIME}
-JOBS=${JOBS}
-GCC_VERSION=${GCC_VERSION}
-BINUTILS_VERSION=${BINUTILS_VERSION}
-LINUX_HEADERS_VERSION=${LINUX_HEADERS_VERSION}
-GLIBC_VERSION=${GLIBC_VERSION}
-MUSL_VERSION=${MUSL_VERSION}
-LLVM_PROJECT_VERSION=${LLVM_PROJECT_VERSION}
-WORK_DIR=build/${BUILD_NAME}
-PREFIX_DIR=${CONFIGURE_PREFIX}
-SYSROOT_DIR=${CONFIGURE_PREFIX}/${TARGET_TRIPLE}/sysroot
-SOURCE_CACHE_DIR=build/sources
-GCC_ARCHIVE=${GCC_ARCHIVE}
-GCC_URL=${GCC_URL}
-GCC_SHA256=${GCC_SHA256}
-BINUTILS_ARCHIVE=${BINUTILS_ARCHIVE}
-BINUTILS_URL=${BINUTILS_URL}
-BINUTILS_SHA256=${BINUTILS_SHA256}
-LINUX_HEADERS_ARCHIVE=${LINUX_HEADERS_ARCHIVE}
-LINUX_HEADERS_URL=${LINUX_HEADERS_URL}
-LINUX_HEADERS_SHA256=${LINUX_HEADERS_SHA256}
-GLIBC_ARCHIVE=${GLIBC_ARCHIVE}
-GLIBC_URL=${GLIBC_URL}
-GLIBC_SHA256=${GLIBC_SHA256}
-MUSL_ARCHIVE=${MUSL_ARCHIVE}
-MUSL_URL=${MUSL_URL}
-MUSL_SHA256=${MUSL_SHA256}
-LLVM_PROJECT_ARCHIVE=${LLVM_PROJECT_ARCHIVE}
-LLVM_PROJECT_URL=${LLVM_PROJECT_URL}
-LLVM_PROJECT_SHA256=${LLVM_PROJECT_SHA256}
-COMBO_STATUS=${COMBO_STATUS}
-COMBO_NOTE=${COMBO_NOTE}
-EOF
+    local key
+    local -a manifest_keys=(
+        BUILD_NAME
+        HOST_TRIPLE
+        TARGET_TRIPLE
+        LIBC_VARIANT
+        CXX_RUNTIME
+        JOBS
+        GCC_VERSION
+        BINUTILS_VERSION
+        LINUX_HEADERS_VERSION
+        GLIBC_VERSION
+        MUSL_VERSION
+        LLVM_PROJECT_VERSION
+        GCC_ARCHIVE
+        GCC_URL
+        GCC_SHA256
+        BINUTILS_ARCHIVE
+        BINUTILS_URL
+        BINUTILS_SHA256
+        LINUX_HEADERS_ARCHIVE
+        LINUX_HEADERS_URL
+        LINUX_HEADERS_SHA256
+        GLIBC_ARCHIVE
+        GLIBC_URL
+        GLIBC_SHA256
+        MUSL_ARCHIVE
+        MUSL_URL
+        MUSL_SHA256
+        LLVM_PROJECT_ARCHIVE
+        LLVM_PROJECT_URL
+        LLVM_PROJECT_SHA256
+        COMBO_STATUS
+        COMBO_NOTE
+    )
+
+    : >"${MANIFEST_PATH}"
+
+    for key in "${manifest_keys[@]}"; do
+        printf '%s=%q\n' "${key}" "${!key}" >>"${MANIFEST_PATH}"
+    done
+
+    printf 'WORK_DIR=%q\n' "build/${BUILD_NAME}" >>"${MANIFEST_PATH}"
+    printf 'PREFIX_DIR=%q\n' "${CONFIGURE_PREFIX}" >>"${MANIFEST_PATH}"
+    printf 'SYSROOT_DIR=%q\n' "${CONFIGURE_PREFIX}/${TARGET_TRIPLE}/sysroot" >>"${MANIFEST_PATH}"
+    printf 'SOURCE_CACHE_DIR=%q\n' 'build/sources' >>"${MANIFEST_PATH}"
 }
