@@ -2,13 +2,39 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+
+resolve_host_path() {
+    local requested_path=$1
+    local fallback_path
+
+    if [[ -e "${requested_path}" || -L "${requested_path}" ]]; then
+        printf '%s' "${requested_path}"
+        return 0
+    fi
+
+    if [[ "${requested_path}" == /* ]]; then
+        fallback_path="${REPO_ROOT}/install${requested_path}"
+        if [[ -e "${fallback_path}" || -L "${fallback_path}" ]]; then
+            printf '%s' "${fallback_path}"
+            return 0
+        fi
+    fi
+
+    printf '%s' "${requested_path}"
+}
+
 if [[ $# -lt 1 || $# -gt 2 ]]; then
     echo "usage: tests/smoke.sh <toolchain-prefix> [sysroot]" >&2
     exit 1
 fi
 
-TOOLCHAIN_PREFIX=$1
+TOOLCHAIN_PREFIX=$(resolve_host_path "$1")
 SYSROOT_DIR=${2-}
+if [[ -n "${SYSROOT_DIR}" ]]; then
+    SYSROOT_DIR=$(resolve_host_path "${SYSROOT_DIR}")
+fi
 RUN_RUNTIME_SMOKE=${RUN_RUNTIME_SMOKE:-0}
 
 if [[ -n "${TARGET_TRIPLE:-}" ]]; then

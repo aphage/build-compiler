@@ -174,11 +174,25 @@ jobs:
 
           # shellcheck disable=SC1090
           source "${manifest_path}"
+
+          workspace_root="${GITHUB_WORKSPACE:-$PWD}"
+          prefix_dir="${workspace_root}/install/${BUILD_NAME}"
+          sysroot_dir="${prefix_dir}/${TARGET_TRIPLE}/sysroot"
+
+          [[ -d "${prefix_dir}/bin" ]] || {
+            echo "resolved toolchain prefix missing: ${prefix_dir}" >&2
+            exit 1
+          }
+          [[ -d "${sysroot_dir}" ]] || {
+            echo "resolved sysroot missing: ${sysroot_dir}" >&2
+            exit 1
+          }
+
           {
             echo "manifest_path=${manifest_path}"
             echo "build_name=${BUILD_NAME}"
-            echo "prefix_dir=${PREFIX_DIR}"
-            echo "sysroot_dir=${SYSROOT_DIR}"
+            echo "prefix_dir=${prefix_dir}"
+            echo "sysroot_dir=${sysroot_dir}"
           } >>"${GITHUB_OUTPUT}"
 
       - name: Run smoke tests
