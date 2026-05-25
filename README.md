@@ -46,6 +46,10 @@ Typical Ubuntu 24.04 setup for the full matrix:
 sudo apt install build-essential curl gawk sed grep bison flex patch python3 texinfo xz-utils tar cmake ninja-build clang lld
 ```
 
+## Manual Build Guide
+
+For a step-by-step guide that reproduces the toolchain manually without using `build-toolchain.sh`, see [docs/manual-toolchain-build.md](docs/manual-toolchain-build.md).
+
 ## Examples
 
 Print the resolved configuration:
