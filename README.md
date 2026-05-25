@@ -87,6 +87,7 @@ The repository includes a manual workflow at `.github/workflows/build-toolchain.
 - Trigger it from the Actions tab with the `Build Cross Toolchain` workflow.
 - Select one supported `combo` input instead of mixing `--libc` and `--cxx-runtime` manually.
 - Override individual component versions through the workflow inputs when needed.
+- Selecting `llvm-libc-libcxx` bootstraps a matching `glibc + libstdc++` donor toolchain in the same job before the final `llvm-libc` build, while still uploading only the requested combo's archive and manifest.
 - Successful runs upload `artifacts/*.tar.xz` and the matching `.manifest` file.
 - Build logs are always uploaded as a separate workflow artifact.
 - `run_smoke_tests` can be left enabled to run `tests/smoke.sh` after the build finishes, including the optional `qemu-arm` runtime check used in CI.

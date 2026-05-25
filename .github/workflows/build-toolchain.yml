@@ -115,26 +115,64 @@ jobs:
         id: combo
         run: |
           set -euo pipefail
+
+          build_name_cxx_runtime_tag() {
+            case "$1" in
+              libc++)
+                printf 'libcxx'
+                ;;
+              libstdc++)
+                printf 'libstdcxx'
+                ;;
+              *)
+                printf '%s' "$1"
+                ;;
+            esac
+          }
+
+          resolve_build_name() {
+            local target_triple="$1"
+            local libc_variant="$2"
+            local cxx_runtime="$3"
+            local cxx_runtime_tag
+
+            cxx_runtime_tag="$(build_name_cxx_runtime_tag "${cxx_runtime}")"
+            printf '%s' "${target_triple}-${libc_variant}-${cxx_runtime_tag}-gcc-${{ inputs.gcc_version }}-binutils-${{ inputs.binutils_version }}-linux-${{ inputs.linux_headers_version }}" |
+              tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._-' '-'
+          }
+
+          requires_glibc_donor=false
+          donor_libc_variant=
+          donor_cxx_runtime=
+          donor_build_name=
           case "${{ inputs.combo }}" in
             glibc-libstdcxx)
+              target_triple="arm-linux-gnueabihf"
               libc_variant="glibc"
               cxx_runtime="libstdc++"
               ;;
             glibc-libcxx)
+              target_triple="arm-linux-gnueabihf"
               libc_variant="glibc"
               cxx_runtime="libc++"
               ;;
             musl-libstdcxx)
+              target_triple="arm-linux-musleabihf"
               libc_variant="musl"
               cxx_runtime="libstdc++"
               ;;
             musl-libcxx)
+              target_triple="arm-linux-musleabihf"
               libc_variant="musl"
               cxx_runtime="libc++"
               ;;
             llvm-libc-libcxx)
+              target_triple="arm-linux-gnueabihf"
               libc_variant="llvm-libc"
               cxx_runtime="libc++"
+              requires_glibc_donor=true
+              donor_libc_variant="glibc"
+              donor_cxx_runtime="libstdc++"
               ;;
             *)
               echo "Unsupported combo: ${{ inputs.combo }}" >&2
@@ -142,11 +180,43 @@ jobs:
               ;;
           esac
 
+          build_name="$(resolve_build_name "${target_triple}" "${libc_variant}" "${cxx_runtime}")"
+          if [[ "${requires_glibc_donor}" == "true" ]]; then
+            donor_build_name="$(resolve_build_name "arm-linux-gnueabihf" "${donor_libc_variant}" "${donor_cxx_runtime}")"
+          fi
+
           {
+            echo "target_triple=${target_triple}"
             echo "libc_variant=${libc_variant}"
             echo "cxx_runtime=${cxx_runtime}"
+            echo "build_name=${build_name}"
+            echo "manifest_path=artifacts/${build_name}.manifest"
+            echo "archive_path=artifacts/${build_name}.tar.xz"
+            echo "requires_glibc_donor=${requires_glibc_donor}"
+            echo "donor_libc_variant=${donor_libc_variant}"
+            echo "donor_cxx_runtime=${donor_cxx_runtime}"
+            echo "donor_build_name=${donor_build_name}"
             echo "artifact_label=${{ inputs.combo }}-gcc-${{ inputs.gcc_version }}"
           } >>"${GITHUB_OUTPUT}"
+
+      - name: Bootstrap glibc donor toolchain
+        if: ${{ steps.combo.outputs.requires_glibc_donor == 'true' }}
+        run: |
+          set -euo pipefail
+          bash ./build-toolchain.sh \
+            --libc "${{ steps.combo.outputs.donor_libc_variant }}" \
+            --cxx-runtime "${{ steps.combo.outputs.donor_cxx_runtime }}" \
+            --jobs "${{ inputs.jobs }}" \
+            --gcc-version "${{ inputs.gcc_version }}" \
+            --binutils-version "${{ inputs.binutils_version }}" \
+            --linux-headers-version "${{ inputs.linux_headers_version }}" \
+            --glibc-version "${{ inputs.glibc_version }}" \
+            --musl-version "${{ inputs.musl_version }}" \
+            --llvm-project-version "${{ inputs.llvm_project_version }}"
+
+          rm -f \
+            "artifacts/${{ steps.combo.outputs.donor_build_name }}.manifest" \
+            "artifacts/${{ steps.combo.outputs.donor_build_name }}.tar.xz"
 
       - name: Build selected toolchain
         run: |
@@ -167,8 +237,8 @@ jobs:
         if: ${{ always() }}
         run: |
           set -euo pipefail
-          manifest_path="$(find artifacts -maxdepth 1 -type f -name '*.manifest' | sort | tail -n 1 || true)"
-          if [[ -z "${manifest_path}" ]]; then
+          manifest_path="${{ steps.combo.outputs.manifest_path }}"
+          if [[ ! -f "${manifest_path}" ]]; then
             exit 0
           fi
 
@@ -218,13 +288,16 @@ jobs:
             echo "- glibc: ${{ inputs.glibc_version }}"
             echo "- musl: ${{ inputs.musl_version }}"
             echo "- llvm-project: ${{ inputs.llvm_project_version }}"
+            if [[ "${{ steps.combo.outputs.requires_glibc_donor }}" == "true" ]]; then
+              echo "- Bootstrap donor: glibc + libstdc++"
+            fi
             if [[ -n "${{ steps.outputs.outputs.build_name }}" ]]; then
               echo "- Build name: ${{ steps.outputs.outputs.build_name }}"
             fi
-            if compgen -G 'artifacts/*.tar.xz' >/dev/null; then
+            if [[ -f "${{ steps.combo.outputs.archive_path }}" ]]; then
               echo
-              echo "### Archives"
-                find artifacts -maxdepth 1 -type f -name '*.tar.xz' -printf '- %f\n' | sort
+              echo "### Archive"
+              echo "- $(basename "${{ steps.combo.outputs.archive_path }}")"
             fi
           } >>"${GITHUB_STEP_SUMMARY}"
 
@@ -234,8 +307,8 @@ jobs:
         with:
           name: ${{ steps.combo.outputs.artifact_label }}
           path: |
-            artifacts/*.tar.xz
-            artifacts/*.manifest
+            ${{ steps.combo.outputs.archive_path }}
+            ${{ steps.combo.outputs.manifest_path }}
           if-no-files-found: error
           compression-level: 0
 
